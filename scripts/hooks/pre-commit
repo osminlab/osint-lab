@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# pre-commit — Guardrail del lab: impide que datos sensibles lleguen a un repo público.
+#
+# Se instala con `make init`. Para saltarlo deliberadamente: git commit --no-verify
+# (hacerlo solo si estás seguro de que el contenido es publicable).
+
+set -uo pipefail
+
+RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; BOLD='\033[1m'; NC='\033[0m'
+BLOCKED=0
+
+block() {
+    echo -e "${RED}${BOLD}  ✗ $1${NC}"
+    [[ -n "${2:-}" ]] && echo -e "    ${YELLOW}$2${NC}"
+    BLOCKED=1
+}
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+[[ -z "$STAGED" ]] && exit 0
+
+echo -e "${BOLD}osint-lab pre-commit${NC} — verificando ${BOLD}$(wc -l <<< "$STAGED")${NC} archivo(s)"
+
+# ── 1. Rutas prohibidas ───────────────────────────────────────────────────────
+while IFS= read -r f; do
+    case "$f" in
+        vault/*)
+            block "$f" "El vault nunca se versiona." ;;
+        config/targets.json)
+            block "$f" "Config con datos reales. Usar config/targets.example.json." ;;
+        .env|*/.env|.env.*)
+            block "$f" "Archivo de entorno con credenciales." ;;
+        scans/*|reports/*|identities/*|leaks/*)
+            block "$f" "Salida de auditoría con hallazgos reales." ;;
+        *.pem|*.key|*.p12|*.pfx|id_rsa*|id_ed25519*)
+            block "$f" "Material criptográfico privado." ;;
+    esac
+done <<< "$STAGED"
+
+# ── 2. Contenido: secretos con forma reconocible ──────────────────────────────
+# Solo patrones con estructura propia — un pattern genérico como "password"
+# produce falsos positivos constantes en un repo cuyo tema es buscar secretos.
+SECRET_PATTERNS=(
+    'ghp_[A-Za-z0-9]{36}'                      # GitHub personal access token
+    'github_pat_[A-Za-z0-9_]{50,}'             # GitHub fine-grained PAT
+    'AKIA[0-9A-Z]{16}'                         # AWS access key
+    'sk-[A-Za-z0-9]{32,}'                      # API keys estilo OpenAI
+    'xox[baprs]-[A-Za-z0-9-]{10,}'             # Slack token
+    'AIza[0-9A-Za-z_-]{35}'                    # Google API key
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----'       # Clave privada embebida
+    '[a-z0-9._%+-]+:[^:@/]{8,}@[a-z0-9.-]+'    # Credenciales en URL de conexión
+)
+SECRET_RE=$(IFS='|'; echo "${SECRET_PATTERNS[*]}")
+
+while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    if git show ":$f" 2>/dev/null | grep -qE "$SECRET_RE"; then
+        block "$f" "Contiene algo con forma de credencial. Revisar antes de commitear."
+    fi
+done <<< "$STAGED"
+
+# ── 3. PII: identidades reales del vault filtradas al repo público ────────────
+# Las identidades configuradas en el vault no deben aparecer en archivos versionados.
+LAB_DIR=$(git rev-parse --show-toplevel)
+CONFIG="$LAB_DIR/vault/config/targets.json"
+
+if [[ -f "$CONFIG" ]] && command -v jq >/dev/null 2>&1; then
+    # Se excluyen los placeholders de la plantilla ("Your Name", "your@email.com",
+    # "https://github.com/your-username"): no son identidades reales y bloquearían
+    # cualquier commit de la propia plantilla.
+    IDENTITIES=$(jq -r '
+        [ .identities.emails[]?,
+          .identities.full_names[]?,
+          (.identities.social_profiles // {} | to_entries[] | .value)
+        ]
+        | map(select(. != null and . != ""))
+        | map(select(test("your[-@. ]|/your-|Your ";"i") | not))[]
+    ' "$CONFIG" 2>/dev/null || true)
+
+    while IFS= read -r identity; do
+        [[ -z "$identity" ]] && continue
+        while IFS= read -r f; do
+            [[ -f "$f" ]] || continue
+            if git show ":$f" 2>/dev/null | grep -qiF "$identity"; then
+                block "$f" "Contiene una identidad real de tu vault: «$identity»"
+            fi
+        done <<< "$STAGED"
+    done <<< "$IDENTITIES"
+fi
+
+# ── Resultado ─────────────────────────────────────────────────────────────────
+echo ""
+if [[ "$BLOCKED" -eq 1 ]]; then
+    echo -e "${RED}${BOLD}Commit bloqueado.${NC} Este repositorio es público."
+    echo -e "Sacar del índice:  ${BOLD}git restore --staged <archivo>${NC}"
+    echo -e "Forzar (a riesgo): ${BOLD}git commit --no-verify${NC}"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Sin datos sensibles en el índice${NC}"
+exit 0

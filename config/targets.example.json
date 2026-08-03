@@ -1,0 +1,56 @@
+{
+  "_comment": "Plantilla. 'make init' la copia a vault/config/targets.json — edita esa copia, no esta. Nunca pongas datos reales aquí: este archivo está versionado en un repositorio público.",
+  "owner": "your-username",
+  "identities": {
+    "full_names": [
+      "Your Full Name",
+      "Your Nickname"
+    ],
+    "usernames": [
+      "your-username",
+      "your-alias"
+    ],
+    "emails": [
+      "your@email.com"
+    ],
+    "domains": [
+      "your-domain.com"
+    ],
+    "social_profiles": {
+      "github": "https://github.com/your-username"
+    }
+  },
+  "local_audit": {
+    "code_dirs": [
+      "~/Documents/codes"
+    ],
+    "cloud_sync_dirs": [
+      "~/GoogleDrive"
+    ],
+    "ssh_dir": "~/.ssh",
+    "dangerous_groups": ["docker", "wheel", "lxd", "adm"],
+    "sensitive_patterns": [
+      "api_key",
+      "api_secret",
+      "secret_key",
+      "password",
+      "passwd",
+      "token",
+      "bearer",
+      "private_key",
+      "access_key",
+      "client_secret",
+      "database_url",
+      "sftp_"
+    ]
+  },
+  "network_audit": {
+    "_comment": "aggressive_scan usa nmap -T4 contra tu IP de red local; puede disparar IDS en redes corporativas o compartidas. Mantener en false salvo en red propia.",
+    "aggressive_scan": false,
+    "scan_local_ip": true,
+    "common_ports": "22,80,443,3000,3306,5432,6379,8080,8443,27017"
+  },
+  "api_keys": {
+    "_comment": "No pongas claves aquí. Van en vault/.env como variables de entorno: HIBP_API_KEY, GITHUB_TOKEN, SHODAN_API_KEY."
+  }
+}

@@ -1,0 +1,54 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  REGLA DE ORO: este repo es PÚBLICO. Solo sube el motor, nunca los datos.
+#  Todo lo que contenga hallazgos, PII o credenciales vive en vault/.
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 1. Vault: datos reales, hallazgos, PII. Nunca, bajo ninguna condición ──
+vault/
+
+# ── 2. Credenciales y configuración con datos reales ──────────────────────
+.env
+.env.*
+!.env.example
+config/targets.json
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*credentials*.json
+*token*.json
+firebase-tools.json
+
+# ── 3. Salidas de auditoría (deny-by-default por nombre y extensión) ──────
+# Rutas del layout anterior: red de seguridad por si quedan restos locales
+scans/
+reports/
+identities/
+leaks/
+*_audit.md
+*_audit.html
+*auditoria*.md
+*auditoría*.md
+*_findings.json
+*_scan.json
+
+# ── 4. Herramientas clonadas y binarios (reinstalables con setup.sh) ──────
+tools/*
+!tools/.gitkeep
+
+# ── 5. Python ─────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ── 6. Sistema y editor ───────────────────────────────────────────────────
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
