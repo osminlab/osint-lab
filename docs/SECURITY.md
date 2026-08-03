@@ -41,6 +41,33 @@ rastreado, que los patrones de `.gitignore` sigan cubriendo las rutas críticas,
 plantilla pública no haya recibido datos reales, que el hook esté instalado y que los
 permisos del vault sean 700. Correrlo antes de cualquier push.
 
+## Guardrail global de git (fuera de este repo)
+
+Las cuatro capas anteriores protegen `osint-lab`. El hallazgo más grave de la primera
+auditoría estaba en otro repositorio, así que la misma idea se aplica a nivel de
+usuario. No forma parte de este repo —vive en `$HOME`— pero se documenta aquí porque
+es donde se explica el modelo:
+
+| Configuración | Qué hace |
+|---|---|
+| `core.excludesFile` → `~/.gitignore_global` | Ignora `.env`, `*.pem`, `*-key.json`, `*.tfstate` y similares en **todos** los repos |
+| `core.hooksPath` → `~/.git-hooks` | Hook de pre-commit que corre `gitleaks git --staged` en cualquier repo |
+| `user.email` → `…@users.noreply.github.com` | Los commits dejan de publicar la dirección real |
+
+Comprobar el estado con:
+
+```bash
+git config --global --get-regexp 'core\.(excludesFile|hooksPath)|user\.email'
+```
+
+`core.hooksPath` **desactiva los hooks de `.git/hooks`** en todos los repositorios. El
+hook global lo compensa delegando explícitamente al hook local del repo cuando existe,
+de modo que el guardrail propio de este lab sigue ejecutándose después del global. Al
+construir esa delegación hay que resolver la ruta desde `git rev-parse --git-dir`: la
+forma aparentemente natural, `git rev-parse --git-path hooks/pre-commit`, respeta
+`core.hooksPath` y devuelve el propio hook global, que al hacer `exec` sobre sí mismo
+entra en recursión infinita.
+
 ## Permisos en disco
 
 `vault/` es `700`; los scans, reportes y configuración se escriben con `600`. Esto

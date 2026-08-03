@@ -48,6 +48,76 @@ Estas salieron de la primera auditoría real y no las puede cerrar el lab por s�
 
 ---
 
+## Higiene de secretos — hábitos, no arreglos puntuales
+
+Los 29 secretos en historiales y la service account commiteada siguieron todos el
+mismo camino: **el secreto vivió dentro del árbol del repo**. A partir de ahí, que
+llegue a git es cuestión de un `git add .` distraído. Cada punto ataca un eslabón
+distinto de esa cadena.
+
+- [ ] **Sacar las credenciales del árbol de los repos.** Es la única medida que
+      elimina el problema en vez de contenerlo. Las claves de servicio van a
+      `~/.config/<proveedor>/` o `~/.secrets/`, y el código lee la ruta desde una
+      variable de entorno. Si el archivo no está dentro del repo, ningún fallo de
+      `.gitignore` puede publicarlo.
+
+- [ ] **Usar Bitwarden para los valores, no archivos `.env`.** `bw` ya está instalado
+      y sin usar. El patrón: el valor vive en la bóveda, el repo solo referencia.
+      ```bash
+      export DB_PASSWORD=$(bw get password "proyecto-x-db")
+      ```
+
+- [ ] **Repos privados por defecto.** Los cinco repos con secretos en el historial
+      resultaron privados o locales — por suerte, no por diseño. Publicar debe ser una
+      decisión consciente que incluya pasar `gitleaks detect` antes.
+
+- [ ] **Preferir credenciales de corta vida.** Un secreto que estuvo en un historial o
+      en un archivo world-readable ya no es secreto: reescribir el historial oculta la
+      evidencia, no revierte la exposición. Tokens con expiración y permisos mínimos
+      reducen la ventana en la que una fuga importa.
+
+- [ ] **Firmar los commits con la clave SSH.** Sin firma, cualquiera puede hacer
+      commits con tu nombre y email, que son públicos. No requiere GPG:
+      ```bash
+      git config --global gpg.format ssh
+      git config --global user.signingkey ~/.ssh/id_ed25519.pub
+      git config --global commit.gpgsign true
+      ```
+      Falta subir `id_ed25519.pub` a GitHub como *signing key* (además de como
+      authentication key) para que aparezca el badge «Verified».
+
+- [ ] **Script de remediación guiado.** Un comando del lab que recorra los pendientes
+      de este archivo y verifique cuáles siguen abiertos tras cada arreglo, en vez de
+      comprobarlos a mano.
+
+---
+
+## Huella personal — la PII no se rota
+
+Los secretos se cambian; la identidad no. Todo lo que ya está indexado (artículo
+institucional, ranking de GitHub, perfiles públicos) es irreversible. Lo que sí
+controlas es no añadir puntos de correlación nuevos.
+
+- [ ] **Decidir sobre la correlación de identidad.** Sherlock encontró 14 perfiles
+      entre `osminlab` y `hectorosminn`. Un username consistente es bueno para marca
+      personal y malo para privacidad: permite unir todas tus cuentas desde una sola
+      búsqueda. No hay respuesta correcta, pero conviene que sea deliberada — separar
+      el username profesional del personal, o asumir el coste conscientemente.
+
+- [ ] **Revisar la privacidad de Facebook.** La auditoría manual del 2026-05-20
+      registró fotos visibles sin necesidad de iniciar sesión.
+
+- [ ] **Ubicación pública en GitHub.** «San Salvador, El Salvador» en el perfil, más
+      la universidad y el área de estudio en fuentes indexadas. Combinados permiten
+      identificarte de forma unívoca. Decidir si el valor profesional compensa.
+
+- [ ] **Los commits antiguos conservan el Gmail.** El cambio a
+      `@users.noreply.github.com` corta la filtración hacia adelante; los commits ya
+      hechos siguen exponiéndolo. Reescribir historiales solo compensa en repos
+      públicos y con pocos commits.
+
+---
+
 ## Lab — funcionalidad
 
 - [ ] **Escaneo completo del almacenamiento en la nube.** El montaje rclone no termina
