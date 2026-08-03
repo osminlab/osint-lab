@@ -27,6 +27,7 @@
     "cloud_sync_dirs": [
       "~/GoogleDrive"
     ],
+    "cloud_scan_timeout": 180,
     "ssh_dir": "~/.ssh",
     "dangerous_groups": ["docker", "wheel", "lxd", "adm"],
     "sensitive_patterns": [

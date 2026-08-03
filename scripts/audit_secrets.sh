@@ -41,16 +41,19 @@ if [[ -n "$RG" ]]; then
         [[ "$HIT_COUNT" -eq 0 ]] && info "Sin patrones sensibles en $CODE_DIR"
     done
 
+    # Montaje de red: se acota con timeout, igual que en audit_local.sh
+    CLOUD_TIMEOUT=$(cfg '.local_audit.cloud_scan_timeout' "180")
+
     for CLOUD_DIR in $CLOUD_DIRS; do
         [[ -d "$CLOUD_DIR" ]] || continue
-        note "Escaneando almacenamiento sincronizado: $CLOUD_DIR"
+        note "Escaneando almacenamiento sincronizado: $CLOUD_DIR (timeout ${CLOUD_TIMEOUT}s)"
 
         while IFS= read -r f; do
             [[ -z "$f" || "$f" == *.example ]] && continue
             crit "Secretos sincronizados a la nube: $f"
             add_finding "CRITICAL" "Credenciales en almacenamiento en la nube" \
                 "$f — credenciales replicadas fuera del disco local; su exposición depende de la seguridad de la cuenta en la nube."
-        done < <("$RG" --no-heading -i -l -e "$PATTERNS" \
+        done < <(timeout "$CLOUD_TIMEOUT" "$RG" --no-heading -i -l -e "$PATTERNS" \
             --glob '*.env' --glob '*.json' --glob '*.txt' --glob '*.yml' --glob '*.yaml' \
             "$CLOUD_DIR" 2>/dev/null | head -20 || true)
     done

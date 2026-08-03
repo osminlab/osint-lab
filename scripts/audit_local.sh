@@ -58,17 +58,35 @@ fi
 # ── 3. Credenciales sincronizadas a la nube ───────────────────────────────────
 section "3. Archivos .env en almacenamiento sincronizado"
 CLOUD_DIRS=$(cfg '.local_audit.cloud_sync_dirs[]')
+# Estos directorios suelen ser montajes de red (rclone, gvfs): un find recursivo
+# descarga metadata remota y puede tardar minutos. Se acota con timeout para que
+# una nube lenta degrade el módulo en vez de colgar la auditoría entera.
+CLOUD_TIMEOUT=$(cfg '.local_audit.cloud_scan_timeout' "180")
 CLOUD_FOUND=0
 
 for CLOUD_DIR in $CLOUD_DIRS; do
     [[ -d "$CLOUD_DIR" ]] || continue
     CLOUD_FOUND=1
+    note "Escaneando $CLOUD_DIR (timeout ${CLOUD_TIMEOUT}s)"
+
+    set +e
+    CLOUD_HITS=$(timeout "$CLOUD_TIMEOUT" \
+        find "$CLOUD_DIR" -name ".env" -not -name "*.example" 2>/dev/null)
+    RC=$?
+    set -e
+
+    if [[ "$RC" -eq 124 ]]; then
+        warn "Escaneo de $CLOUD_DIR incompleto: se agotó el timeout"
+        add_finding "INFO" "Escaneo de nube incompleto" \
+            "$CLOUD_DIR no terminó de recorrerse en ${CLOUD_TIMEOUT}s — subir local_audit.cloud_scan_timeout para cobertura completa."
+    fi
+
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         warn "Credenciales sincronizadas a la nube: $f"
         add_finding "HIGH" "Archivo .env con credenciales en almacenamiento en la nube" \
             "$f — si la cuenta de la nube es comprometida, estas credenciales quedan expuestas."
-    done < <(find "$CLOUD_DIR" -name ".env" -not -name "*.example" 2>/dev/null)
+    done <<< "$CLOUD_HITS"
 done
 
 if [[ "$CLOUD_FOUND" -eq 0 ]]; then
