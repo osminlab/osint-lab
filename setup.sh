@@ -14,19 +14,29 @@ warn()  { echo -e "${YELLOW}  ⚠ $1${NC}"; }
 fail()  { echo -e "${RED}  ✗ $1${NC}"; }
 
 # ── 1. Herramientas del sistema ───────────────────────────────────────────────
+# Todo lo demás (gitleaks, venv, clones) se instala sin privilegios, así que la
+# ausencia de sudo degrada esta sección en vez de abortar el setup completo.
 step "Instalando herramientas del sistema (requiere sudo)"
-sudo apt-get update -qq
-sudo apt-get install -y \
-    git curl wget jq tree tmux \
-    python3 python3-pip python3-venv \
-    ripgrep fd-find \
-    nmap dnsutils whois \
-    exiftool \
-    sqlite3 \
-    net-tools \
-    bat \
-    htop \
-    2>/dev/null && ok "apt packages instalados" || warn "Algunos paquetes fallaron — continúa de todos modos"
+APT_PACKAGES=(
+    git curl wget jq tree tmux
+    python3 python3-pip python3-venv
+    ripgrep fd-find
+    nmap dnsutils whois
+    exiftool sqlite3 net-tools bat htop
+)
+
+if ! command -v apt-get &>/dev/null; then
+    warn "apt-get no disponible — instalar manualmente: ${APT_PACKAGES[*]}"
+elif sudo -n true 2>/dev/null; then
+    sudo apt-get update -qq || true
+    sudo apt-get install -y "${APT_PACKAGES[@]}" >/dev/null 2>&1 \
+        && ok "paquetes apt instalados" \
+        || warn "algunos paquetes apt fallaron — el setup continúa"
+else
+    warn "sudo requiere contraseña — sección omitida. Correr manualmente:"
+    echo "      sudo apt install -y ${APT_PACKAGES[*]}"
+    SKIPPED_APT=1
+fi
 
 # bat se instala como batcat en Ubuntu/Debian — crear alias
 if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
@@ -110,12 +120,22 @@ clone_tool() {
 clone_tool "theHarvester" "https://github.com/laramies/theHarvester.git"
 clone_tool "sherlock"      "https://github.com/sherlock-project/sherlock.git"
 
-# Instalar deps de theHarvester y sherlock dentro del venv
+# Ambas se distribuyen como paquetes Python y han cambiado de layout entre versiones
+# (script suelto → pyproject.toml). Instalarlas en modo editable crea los entry points
+# en el venv, que es la única forma estable de invocarlas: no depende de dónde quede
+# el .py dentro del clon.
 source "$VENV_DIR/bin/activate"
-[[ -f "$TOOLS_DIR/theHarvester/requirements/base.txt" ]] && \
-    pip install -q -r "$TOOLS_DIR/theHarvester/requirements/base.txt" && ok "theHarvester deps instalados"
-[[ -f "$TOOLS_DIR/sherlock/requirements.txt" ]] && \
-    pip install -q -r "$TOOLS_DIR/sherlock/requirements.txt" && ok "sherlock deps instalados"
+for tool in theHarvester sherlock; do
+    tool_dir="$TOOLS_DIR/$tool"
+    [[ -d "$tool_dir" ]] || continue
+    if [[ -f "$tool_dir/pyproject.toml" || -f "$tool_dir/setup.py" ]]; then
+        pip install -q -e "$tool_dir" 2>/dev/null \
+            && ok "$tool instalado en el venv" \
+            || warn "$tool: instalación editable falló"
+    elif [[ -f "$tool_dir/requirements.txt" ]]; then
+        pip install -q -r "$tool_dir/requirements.txt" && ok "$tool deps instalados"
+    fi
+done
 deactivate
 
 # ── 6. Vault y guardrails ─────────────────────────────────────────────────────
@@ -161,3 +181,20 @@ done
 [[ -d "$TOOLS_DIR/sherlock" ]]  && printf "    %-15s %s\n" "sherlock"  "$TOOLS_DIR/sherlock/sherlock.py"
 [[ -d "$TOOLS_DIR/theHarvester" ]] && printf "    %-15s %s\n" "theHarvester" "$TOOLS_DIR/theHarvester/theHarvester.py"
 echo ""
+
+# Si se omitió apt, avisar solo de lo que falta de verdad: los binarios pueden
+# haberse instalado antes por otra vía, y repetir la lista completa hace ruido.
+if [[ -n "${SKIPPED_APT:-}" ]]; then
+    MISSING=()
+    for bin in nmap whois dig rg exiftool jq sqlite3; do
+        command -v "$bin" &>/dev/null || MISSING+=("$bin")
+    done
+    if [[ ${#MISSING[@]} -gt 0 ]]; then
+        warn "Faltan herramientas — cobertura parcial hasta instalarlas:"
+        echo "      sudo apt install -y ${MISSING[*]}"
+        echo ""
+    else
+        ok "Todas las herramientas de sistema ya estaban presentes"
+        echo ""
+    fi
+fi

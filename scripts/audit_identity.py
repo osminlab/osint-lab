@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """audit_identity.py — Presencia pública de identidades: usernames, emails, dominios."""
 
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -125,26 +126,51 @@ def check_github_profile(usernames: list[str]) -> list[dict]:
     return findings
 
 
-def run_sherlock(usernames: list[str]) -> list[dict]:
-    """Busca los usernames en plataformas públicas con Sherlock."""
-    candidates = [
-        paths.TOOLS_DIR / "sherlock" / "sherlock" / "sherlock.py",
-        paths.TOOLS_DIR / "sherlock" / "sherlock.py",
-    ]
-    script = next((c for c in candidates if c.exists()), None)
-    if not script:
-        warn("Sherlock no encontrado en tools/ — correr: make setup")
-        return []
+def resolve_tool(entry_point: str, module: str, clone_dir: str) -> list[str] | None:
+    """Devuelve el comando para invocar una herramienta OSINT, o None si no está.
+
+    Sherlock y theHarvester se distribuyen como paquetes Python y han cambiado de
+    layout entre versiones (script suelto → paquete con pyproject.toml). Se prueban
+    tres formas en orden de robustez, en vez de asumir una ruta fija:
+      1. el ejecutable instalado en el venv del lab
+      2. el módulo importable desde el venv (`python -m`)
+      3. el módulo ejecutado desde el clon en tools/, sin instalar
+    """
+    venv_bin = paths.VENV_PYTHON.parent / entry_point
+    if venv_bin.exists():
+        return [str(venv_bin)]
 
     python_bin = str(paths.VENV_PYTHON) if paths.VENV_PYTHON.exists() else sys.executable
+    probe = subprocess.run(
+        [python_bin, "-c", f"import {module}"], capture_output=True, timeout=30
+    )
+    if probe.returncode == 0:
+        return [python_bin, "-m", module]
+
+    clone = paths.TOOLS_DIR / clone_dir
+    if (clone / module).is_dir() or (clone / f"{module}.py").exists():
+        return [python_bin, "-m", module]
+
+    return None
+
+
+def run_sherlock(usernames: list[str]) -> list[dict]:
+    """Busca los usernames en plataformas públicas con Sherlock."""
+    cmd = resolve_tool("sherlock", "sherlock_project", "sherlock")
+    if not cmd:
+        warn("Sherlock no encontrado — correr: make setup")
+        return []
+
+    cwd = paths.TOOLS_DIR / "sherlock"
     findings = []
 
     for username in usernames:
         note(f"Sherlock: {username}")
         try:
             result = subprocess.run(
-                [python_bin, str(script), username, "--print-found", "--timeout", "10"],
+                [*cmd, username, "--print-found", "--timeout", "10"],
                 capture_output=True, text=True, timeout=300,
+                cwd=str(cwd) if cwd.is_dir() else None,
             )
         except subprocess.TimeoutExpired:
             warn(f"Sherlock: timeout para {username}")
@@ -183,20 +209,21 @@ def run_sherlock(usernames: list[str]) -> list[dict]:
 
 def run_theharvester(domains: list[str]) -> list[dict]:
     """Emails y hosts asociados a dominios propios, vía theHarvester."""
-    script = paths.TOOLS_DIR / "theHarvester" / "theHarvester.py"
-    if not script.exists():
-        warn("theHarvester no encontrado en tools/ — correr: make setup")
+    cmd = resolve_tool("theHarvester", "theHarvester", "theHarvester")
+    if not cmd:
+        warn("theHarvester no encontrado — correr: make setup")
         return []
 
-    python_bin = str(paths.VENV_PYTHON) if paths.VENV_PYTHON.exists() else sys.executable
+    cwd = paths.TOOLS_DIR / "theHarvester"
     findings = []
 
     for domain in domains:
         note(f"theHarvester: {domain}")
         try:
             result = subprocess.run(
-                [python_bin, str(script), "-d", domain, "-b", "bing,duckduckgo,crtsh", "-l", "50"],
-                capture_output=True, text=True, timeout=300, cwd=str(script.parent),
+                [*cmd, "-d", domain, "-b", "bing,duckduckgo,crtsh", "-l", "50"],
+                capture_output=True, text=True, timeout=300,
+                cwd=str(cwd) if cwd.is_dir() else None,
             )
         except subprocess.TimeoutExpired:
             warn(f"theHarvester: timeout para {domain}")
@@ -205,13 +232,20 @@ def run_theharvester(domains: list[str]) -> list[dict]:
             warn(f"theHarvester: {exc}")
             continue
 
+        # El banner de theHarvester incluye el email de su propio autor, y la salida
+        # mezcla adornos ASCII con los resultados. Solo cuentan las direcciones cuyo
+        # dominio sea el auditado o un subdominio suyo: lo demás no es del objetivo.
+        email_re = re.compile(
+            r"[A-Za-z0-9._%%+-]+@(?:[A-Za-z0-9-]+\.)*%s" % re.escape(domain),
+            re.IGNORECASE,
+        )
         emails, hosts = [], []
         for raw in (result.stdout + result.stderr).splitlines():
             line = raw.strip()
-            if "@" in line and "." in line and not line.startswith("["):
-                emails.append(line)
-            elif line.startswith("- ") and "." in line:
-                hosts.append(line[2:])
+            emails.extend(email_re.findall(line))
+            if line.startswith("- ") and domain in line:
+                hosts.append(line[2:].strip())
+        emails = sorted(set(emails))
 
         for email in emails[:10]:
             warn(f"  Email expuesto: {email}")
